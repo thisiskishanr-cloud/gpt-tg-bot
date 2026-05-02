@@ -1,5 +1,22 @@
 import os
 import asyncio
+from quart import Quart
+import threading
+
+# Initialize Quart app
+webapp = Quart(__name__)
+
+@webapp.route('/')
+async def home():
+    return "Benjamin is alive and healthy!"
+
+# Function to run the web server
+def run_webapp():
+    # Port 7860 is mandatory for Hugging Face health checks
+    webapp.run(host='0.0.0.0', port=7860)
+
+# ... your existing environment variables and client setup ...
+
 
 # Fix for Python 3.14 asyncio event loop issue (must be BEFORE pyrogram import)
 try:
@@ -63,5 +80,11 @@ def reply(_, message):
 
 
 
-print("Benjamin is running with Pyrogram...")
-app.run()
+# At the very bottom of your script, modify the startup:
+if __name__ == "__main__":
+    # Start the web server in a separate thread so it doesn't block the bot
+    threading.Thread(target=run_webapp, daemon=True).start()
+    
+    # Now start your Pyrogram bot
+    print("Benjamin is running...")
+    app.run()
