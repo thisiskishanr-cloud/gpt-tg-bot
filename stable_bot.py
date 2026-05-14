@@ -1,24 +1,21 @@
 import os
 import asyncio
-from quart import Quart
 import threading
+import requests  # Added for fetching the GitHub list
+from flask import Flask
 
-# Initialize Quart app
-webapp = Quart(__name__)
+# Initialize Flask app
+webapp = Flask(__name__)
 
 @webapp.route('/')
-async def home():
+def home():
     return "Benjamin is alive and healthy!"
 
-# Function to run the web server
 def run_webapp():
-    # Port 7860 is mandatory for Hugging Face health checks
-    webapp.run(host='0.0.0.0', port=7860)
+    # Mandatory port 7860 for Hugging Face health checks
+    webapp.run(host='0.0.0.0', port=7860, debug=False, use_reloader=False)
 
-# ... your existing environment variables and client setup ...
-
-
-# Fix for Python 3.14 asyncio event loop issue (must be BEFORE pyrogram import)
+# Fix for Python 3.14 asyncio event loop issue
 try:
     asyncio.get_event_loop()
 except RuntimeError:
@@ -32,14 +29,14 @@ BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ_KEY = os.getenv("GROQ_API_KEY")
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
+# Update this with your actual Raw GitHub URL
+MANUAL_LIST_URL = "https://raw.githubusercontent.com/thisiskishanr-cloud/benjamin-bot/refs/heads/main/manual_books.txt"
 
 if not BOT_TOKEN or not GROQ_KEY or not API_ID or not API_HASH:
     raise ValueError("Missing required environment variables")
 
-# Groq client
 client_groq = Groq(api_key=GROQ_KEY)
 
-# Pyrogram bot
 app = Client(
     "benjamin-bot",
     bot_token=BOT_TOKEN,
@@ -47,27 +44,61 @@ app = Client(
     api_hash=API_HASH
 )
 
+def get_manual_list():
+    """Fetches standalone titles from GitHub to keep Benjamin's memory updated."""
+    try:
+        r = requests.get(MANUAL_LIST_URL, timeout=5)
+        return r.text.replace('\n', ', ')
+    except Exception as e:
+        print(f"List Fetch Error: {e}")
+        return "None currently listed."
+
 @app.on_message(filters.command("start"))
 def start(_, message):
-    message.reply_text("Holey cheese! I'm Benjamin 🐭\nReady for an adventure!")
-
+    message.reply_text("Holey cheese! I'm Benjamin 🐭\nHow can I help your whiskers today?")
 
 @app.on_message(filters.text & ~filters.command(["start"]))
 def reply(_, message):
     user_msg = message.text
+    words = user_msg.split()
+    
+    # Check if the message is specifically a reply to the bot
+    is_reply_to_bot = message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self
+    
+    # Check if Benjamin is mentioned by name
+    name_mentioned = "benjamin" in user_msg.lower()
+
+    # LOGIC GATE:
+    # 1. Reply if it's a reply to the bot
+    # 2. Reply if message is 3 words or more
+    # 3. Reply if less than 3 words BUT name is mentioned
+    if not (is_reply_to_bot or len(words) >= 2 or (len(words) < 2 and name_mentioned)):
+        return
 
     try:
+        # Fetch the latest list from GitHub
+        standalone_titles = get_manual_list()
+
+        # Build the dynamic "Support Group Librarian" personality
+        system_content = f"""
+You are Benjamin Stilton 🐭, a playful mouse in the Geronimo Stilton Support Group! 
+Every user prompt is a live Telegram message you must react to.
+COMPLETED SERIES:
+1. GS Main (1-83), Kingdom of Fantasy (1-15), Journey Through Time (1-8), Thea Specials.
+2. Mini-Series: Cavemice (1-15), Spacemice (1-12), Creepella (1-9).
+3. Others: {standalone_titles}
+LIBRARIAN RULES:
+- Confirm available books are in the channel; else say it will be uploaded shortly.
+- SECURITY: If a message is a scam (money, paid work, adult content), playfully reject it and include #report @admin.
+- Be fun, mousy, and keep replies short.
+- Never ask follow-up questions; provide the answer and stop; never tell anything you aren't sure of.
+"""
+
         response = client_groq.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
-                {
-                    "role": "system",
-                    "content": "You are Benjamin Stilton. Keep replies short, fun, and playful like a curious mouse."
-                },
-                {
-                    "role": "user",
-                    "content": user_msg
-                }
+                {"role": "system", "content": system_content},
+                {"role": "user", "content": user_msg}
             ]
         )
 
@@ -76,15 +107,12 @@ def reply(_, message):
 
     except Exception as e:
         print(f"Error: {e}")
-        message.reply_text("Oops! Something went wrong 🧀")
+        # Keep the error message in character
+        message.reply_text("Oops! My whiskers got tangled. Something went wrong! 🧀")
 
-
-
-# At the very bottom of your script, modify the startup:
 if __name__ == "__main__":
-    # Start the web server in a separate thread so it doesn't block the bot
+    # Start the Flask web server in a separate thread to satisfy HF health checks
     threading.Thread(target=run_webapp, daemon=True).start()
     
-    # Now start your Pyrogram bot
     print("Benjamin is running...")
     app.run()
