@@ -3,6 +3,8 @@ import asyncio
 import threading
 import requests  # Added for fetching the GitHub list
 from flask import Flask
+from pyrogram.enums import ChatType
+
 
 # Initialize Flask app
 webapp = Flask(__name__)
@@ -58,29 +60,29 @@ def start(_, message):
     message.reply_text("Holey cheese! I'm Benjamin 🐭\nHow can I help your whiskers today?")
 
 @app.on_message(filters.text & ~filters.command(["start"]))
-def reply(_, message):
+def reply(client, message):
     user_msg = message.text
     words = user_msg.split()
-    
-    # Check if the message is specifically a reply to the bot
-    is_reply_to_bot = message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self
-    
-    # Check if Benjamin is mentioned by name
+    bot_id = client.me.id
+
+    is_private = message.chat.type == ChatType.PRIVATE
+    is_reply = message.reply_to_message is not None
+    is_reply_to_bot = is_reply and message.reply_to_message.from_user and message.reply_to_message.from_user.id == bot_id
     name_mentioned = "benjamin" in user_msg.lower()
 
-    # LOGIC GATE:
-    # 1. Reply if it's a reply to the bot
-    # 2. Reply if message is 3 words or more
-    # 3. Reply if less than 3 words BUT name is mentioned
-    if not (is_reply_to_bot or len(words) >= 2 or (len(words) < 2 and name_mentioned)):
+    # 2. The Gatekeeper
+    if not is_private and is_reply and not is_reply_to_bot:
+        return
+
+    # 3. The Trigger
+    if not (is_private or is_reply_to_bot or len(words) >= 3 or (len(words) < 3 and name_mentioned)):
         return
 
     try:
-        # Fetch the latest list from GitHub
         standalone_titles = get_manual_list()
 
-        # Build the dynamic "Support Group Librarian" personality
-        system_content = f"""
+        # --- GROUP PROMPT ---
+        group_prompt = f"""
 You are Benjamin Stilton 🐭, a playful mouse in the Geronimo Stilton Support Group! 
 Every user prompt is a live Telegram message you must react to.
 COMPLETED SERIES:
@@ -91,8 +93,17 @@ LIBRARIAN RULES:
 - Confirm available books are in the channel; else say it will be uploaded shortly.
 - SECURITY: If a message is a scam (money, paid work, adult content), playfully reject it and include #report @admin.
 - Be fun, mousy, and keep replies short.
-- Never ask follow-up questions; provide the answer and stop; never tell anything you aren't sure of.
-"""
+- Never ask follow-up questions; provide the answer and stop; never tell anything you aren't sure of."""
+
+        # --- PM PROMPT ---
+        pm_prompt = f"""
+You are Benjamin Stilton 🐭! You’re moderator of @geronimostiltonbooks group.
+But now you’re in a private message (PM) with a friend. Answer cheerfully for everything and never ask follow up questions. Give the response and stop. Make the response short."""
+
+        # 4. Selection
+        system_content = pm_prompt if is_private else group_prompt
+
+        # ... Proceed to Groq API call ...
 
         response = client_groq.chat.completions.create(
             model="llama-3.3-70b-versatile",
