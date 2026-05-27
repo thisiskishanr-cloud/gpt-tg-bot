@@ -1,7 +1,0 @@
-services:
-  - type: web
-    name: benjamin-bot
-    env: python
-    plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: python stable_bot.py
